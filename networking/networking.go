@@ -3,10 +3,8 @@ package networking
 import (
 	"context"
 	"fmt"
-	"io"
 	"lamport-smr/helpers"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 	"sync"
@@ -14,16 +12,18 @@ import (
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	peerstore "github.com/libp2p/go-libp2p/core/peer"
 )
 
+const PROTCOL_ID = "/smr/1.0.0"
+
 // NodeCtx holds the host address, peer addresses, and connections.
 type NodeCtx struct {
-	pid         int
-	peerPids    int
-	host        host.Host
-	connections []net.Conn
+	pid     int
+	host    host.Host
+	streams []network.Stream
 	sync.Mutex
 }
 
@@ -33,18 +33,18 @@ var nodeCtx *NodeCtx
 // once is used to ensure that initCtx is only called once.
 var once sync.Once
 
-func initCtx() {
+func initCtx(pid int, host host.Host) {
 	once.Do(func() {
 		nodeCtx = &NodeCtx{
-			host:        nil,
-			connections: make([]net.Conn, 0),
+			pid:     pid,
+			host:    host,
+			streams: make([]network.Stream, 0),
 		}
 	})
 }
 
 // StartHost starts the host and starts listening on the provided address
 func StartHost(hostAddr string, pid int, wg *sync.WaitGroup) {
-	initCtx()
 	priv, err := helpers.GetKey(pid)
 	if err != nil {
 		log.Panicf("Error getting private key for peer %v: %v", pid, err)
@@ -62,7 +62,8 @@ func StartHost(hostAddr string, pid int, wg *sync.WaitGroup) {
 	if err != nil {
 		log.Panicf("Error starting the host: %v", err)
 	}
-	nodeCtx.host = host
+	initCtx(pid, host)
+	nodeCtx.host.SetStreamHandler(PROTCOL_ID, handleStream)
 	peerInfo := peerstore.AddrInfo{
 		ID:    host.ID(),
 		Addrs: host.Addrs(),
@@ -71,34 +72,9 @@ func StartHost(hostAddr string, pid int, wg *sync.WaitGroup) {
 	if err != nil {
 		log.Panicf("Error getting address info for peer %v: %v", pid, err)
 	}
-	fmt.Println("libp2p node address:", addrs[0])
+	fmt.Println("libp2p host address:", addrs[0])
 	wg.Add(1)
 	go waitForGracefulShutdown(wg)
-}
-
-func handleConnection(conn net.Conn) {
-	defer func() {
-		conn.Close()
-		// removeConnection(conn)
-	}()
-
-	for {
-		// Read the entire message from the connection
-		msgBytes, err := io.ReadAll(conn)
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("Error reading from connection: %v", err)
-			}
-			return // Close the connection on error or EOF
-		}
-
-		// Ensure the message has at least one byte for the message type
-		if len(msgBytes) == 0 {
-			log.Printf("Received empty message from connection")
-			return // Close the connection if the message is empty
-		}
-
-	}
 }
 
 // func removeConnection(conn net.Conn) {
@@ -112,6 +88,12 @@ func handleConnection(conn net.Conn) {
 // 		}
 // 	}
 // }
+
+func handleStream(stream network.Stream) {
+	for {
+
+	}
+}
 
 // EstablishConnections establishes connections with the given peers.
 func EstablishConnections(peers map[string]int) {
@@ -127,6 +109,12 @@ func EstablishConnections(peers map[string]int) {
 			log.Panicf("Failed to connect to peer %v: %v", peerAddr, err)
 		}
 		log.Printf("Successfully connected to %v", peerInfo.Addrs[0])
+		stream, err := nodeCtx.host.NewStream(context.Background(), peerInfo.ID, PROTCOL_ID)
+		if err != nil {
+			log.Panicf("Error creating new stream with %v: %v", peerAddr, err)
+		}
+		log.Printf("Successfully created stream with %v", peerInfo.Addrs[0])
+		nodeCtx.streams = append(nodeCtx.streams, stream)
 	}
 }
 

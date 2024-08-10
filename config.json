@@ -1,6 +1,6 @@
 {
     "hosts": [
-        "/ip4/127.0.0.1/tcp/8080/p2p/12D3KooWRvrQwvjYJeq1cgxiEucJmaNNfUZynVkf1mGysEGcYJBN",
-        "/ip4/127.0.0.1/tcp/8081/p2p/12D3KooWLUfeugEde4HxdVtmkStxyuLuxoqWcdzHyscmTmfZANaK"
+        "/ip4/127.0.0.1/tcp/8080/p2p/12D3KooWJDVE5AzCJnLBU2m3aj1ksZvhS9m5RkEF6dQGzpc7AbGE",
+        "/ip4/127.0.0.1/tcp/8081/p2p/12D3KooWLhHbrsnrfrAdYkKk9MdDJKYf2v2eVgqQPwxyvLSqk7v6"
     ]
 }
