@@ -2,8 +2,9 @@ package networking
 
 import (
 	"context"
-	"fmt"
+	"io"
 	"lamport-smr/helpers"
+	sm "lamport-smr/state-machine"
 	"log"
 	"os"
 	"os/signal"
@@ -14,14 +15,12 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	peerstore "github.com/libp2p/go-libp2p/core/peer"
 )
 
 const PROTCOL_ID = "/smr/1.0.0"
 
 // NodeCtx holds the host address, peer addresses, and connections.
 type NodeCtx struct {
-	pid     int
 	host    host.Host
 	streams []network.Stream
 	sync.Mutex
@@ -33,10 +32,9 @@ var nodeCtx *NodeCtx
 // once is used to ensure that initCtx is only called once.
 var once sync.Once
 
-func initCtx(pid int, host host.Host) {
+func initCtx(host host.Host) {
 	once.Do(func() {
 		nodeCtx = &NodeCtx{
-			pid:     pid,
 			host:    host,
 			streams: make([]network.Stream, 0),
 		}
@@ -44,11 +42,17 @@ func initCtx(pid int, host host.Host) {
 }
 
 // StartHost starts the host and starts listening on the provided address
-func StartHost(hostAddr string, pid int, wg *sync.WaitGroup) {
+func StartHost(hostAddr string, wg *sync.WaitGroup) {
+	if sm.GlobalSmCtx == nil {
+		log.Panic("GlobalSmCtx is not initialized")
+	}
+
+	pid := sm.GlobalSmCtx.Pid
 	priv, err := helpers.GetKey(pid)
 	if err != nil {
 		log.Panicf("Error getting private key for peer %v: %v", pid, err)
 	}
+
 	multiAddr, err := helpers.ParseMultiaddress(hostAddr)
 	if err != nil {
 		log.Panicf("Error parsing multiaddress for %v: %v", pid, err)
@@ -62,44 +66,30 @@ func StartHost(hostAddr string, pid int, wg *sync.WaitGroup) {
 	if err != nil {
 		log.Panicf("Error starting the host: %v", err)
 	}
-	initCtx(pid, host)
+
+	initCtx(host)
+
 	nodeCtx.host.SetStreamHandler(PROTCOL_ID, handleStream)
-	peerInfo := peerstore.AddrInfo{
-		ID:    host.ID(),
-		Addrs: host.Addrs(),
-	}
-	addrs, err := peerstore.AddrInfoToP2pAddrs(&peerInfo)
-	if err != nil {
-		log.Panicf("Error getting address info for peer %v: %v", pid, err)
-	}
-	fmt.Println("libp2p host address:", addrs[0])
-	wg.Add(1)
-	go waitForGracefulShutdown(wg)
-}
+	log.Println("---SUCCESSFULLY INITIALIZED HOST---")
 
-// func removeConnection(conn net.Conn) {
-// 	nodeCtx.Lock()
-// 	defer nodeCtx.Unlock()
-
-// 	for i, connection := range nodeCtx.connections {
-// 		if connection.RemoteAddr().String() == conn.RemoteAddr().String() {
-// 			nodeCtx.connections = append(nodeCtx.connections[:i], nodeCtx.connections[i+1:]...)
-// 			break
-// 		}
-// 	}
-// }
-
-func handleStream(stream network.Stream) {
-	for {
-
-	}
+	wg.Add(2)
+	go handleOutgoingOps(wg)
+	go waitForShutdownSignal(wg)
 }
 
 // EstablishConnections establishes connections with the given peers.
-func EstablishConnections(peers map[string]int) {
+func EstablishConnections() {
 	if nodeCtx == nil {
 		log.Panic("NodeCtx is not initialized")
 	}
+	if sm.GlobalSmCtx == nil {
+		log.Panic("GlobalSmCtx is not initialized")
+	}
+
+	peers := sm.GlobalSmCtx.PeerPids
+	nodeCtx.Lock()
+	defer nodeCtx.Unlock()
+
 	for peerAddr := range peers {
 		peerInfo, err := peer.AddrInfoFromString(peerAddr)
 		if err != nil {
@@ -118,12 +108,76 @@ func EstablishConnections(peers map[string]int) {
 	}
 }
 
-func waitForGracefulShutdown(wg *sync.WaitGroup) {
+func handleOutgoingOps(wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for {
+		op := <-sm.GlobalSmCtx.OutgoingOperations
+		marshaledOp, err := sm.MarshalOperation(op)
+		if err != nil {
+			log.Panicf("Failed to marshal operation %v: %v", op, err)
+		}
+		for _, stream := range nodeCtx.streams {
+			n, err := stream.Write(marshaledOp)
+			if err != nil {
+				log.Panicf("Failed to write operation to stream %v: %v", op, err)
+			} else if n != len(marshaledOp) {
+				log.Panicf("Failed to write entire operation to stream %v: %v", op, err)
+			} else {
+				log.Printf("Sent op %v to %v", op, stream.Conn().RemoteMultiaddr())
+			}
+		}
+	}
+}
+
+func handleStream(stream network.Stream) {
+	defer func() {
+		removeStream(stream)
+		stream.Close()
+	}()
+
+	log.Println("Stream opened to ", stream.Conn().RemoteMultiaddr().String())
+
+	buffer := make([]byte, 1024) // Buffer to hold incoming data
+
+	for {
+		n, err := stream.Read(buffer)
+		if err != nil {
+			if err != io.EOF {
+				log.Panicf("Error reading from stream with %v: %v", stream.Conn().RemoteMultiaddr().String(), err)
+			}
+			break
+		}
+
+		if n > 0 {
+			msg := buffer[:n]
+			op, err := sm.UnmarshalOperation(msg)
+			if err != nil {
+				log.Panicf("Error unmarshaling operation from %v: %v", stream.Conn().RemoteMultiaddr().String(), err)
+			}
+			sm.GlobalSmCtx.IncomingOperations <- op
+		}
+	}
+}
+
+func removeStream(stream network.Stream) {
+	nodeCtx.Lock()
+	defer nodeCtx.Unlock()
+
+	for i, currSteam := range nodeCtx.streams {
+		if stream.ID() == currSteam.ID() {
+			nodeCtx.streams = append(nodeCtx.streams[:i], nodeCtx.streams[i+1:]...)
+			break
+		}
+	}
+}
+
+func waitForShutdownSignal(wg *sync.WaitGroup) {
 	defer wg.Done()
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	<-ch
-	fmt.Println("Received signal, shutting down...")
+	log.Println("Received signal, shutting down...")
 	if err := nodeCtx.host.Close(); err != nil {
 		panic(err)
 	}

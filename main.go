@@ -4,6 +4,7 @@ import (
 	"flag"
 	"lamport-smr/helpers"
 	"lamport-smr/networking"
+	sm "lamport-smr/state-machine"
 	"log"
 	"sync"
 	"time"
@@ -18,15 +19,15 @@ func main() {
 	if err != nil {
 		log.Panicf("Error parsing config file: %v", err)
 	}
-
-	log.Printf("%v", serverAddr)
-	log.Printf("%v", peers)
-
 	var wg sync.WaitGroup
 
-	networking.StartHost(serverAddr, *pid, &wg)
+	sm.InitGlobalSmCtx(*pid, peers, &wg)
+
+	networking.StartHost(serverAddr, &wg)
 	time.Sleep(3 * time.Second)
-	networking.EstablishConnections(peers)
+	networking.EstablishConnections()
+
+	close(sm.GlobalSmCtx.StartSignal) // Send start signal after network is setup
 
 	wg.Wait()
 }
