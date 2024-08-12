@@ -24,7 +24,7 @@ func main() {
 	sm.InitGlobalSmCtx(*pid, peers, &wg)
 
 	networking.StartHost(serverAddr, &wg)
-	time.Sleep(3 * time.Second)
+	time.Sleep(3 * time.Second) // Give time to all peers to start their hosts
 	networking.EstablishConnections()
 
 	close(sm.GlobalSmCtx.StartSignal) // Send start signal after network is setup

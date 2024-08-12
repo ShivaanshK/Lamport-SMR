@@ -112,19 +112,19 @@ func handleOutgoingOps(wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for {
-		op := <-sm.GlobalSmCtx.OutgoingOperations
-		marshaledOp, err := sm.MarshalOperation(op)
+		msg := <-sm.GlobalSmCtx.OutgoingMessages
+		marshaledMsg, err := sm.MarshalMessage(msg)
 		if err != nil {
-			log.Panicf("Failed to marshal operation %v: %v", op, err)
+			log.Panicf("Failed to marshal message: %v", err)
 		}
 		for _, stream := range nodeCtx.streams {
-			n, err := stream.Write(marshaledOp)
+			n, err := stream.Write(marshaledMsg)
 			if err != nil {
-				log.Panicf("Failed to write operation to stream %v: %v", op, err)
-			} else if n != len(marshaledOp) {
-				log.Panicf("Failed to write entire operation to stream %v: %v", op, err)
+				log.Panicf("Failed to write operation to stream: %v", err)
+			} else if n != len(marshaledMsg) {
+				log.Panicf("Failed to write entire operation to stream: %v", err)
 			} else {
-				log.Printf("Sent op %v to %v", op, stream.Conn().RemoteMultiaddr())
+				log.Printf("Sent message of type %v to %v", msg.MsgType, stream.Conn().RemoteMultiaddr())
 			}
 		}
 	}
@@ -151,11 +151,11 @@ func handleStream(stream network.Stream) {
 
 		if n > 0 {
 			msg := buffer[:n]
-			op, err := sm.UnmarshalOperation(msg)
+			unmarshaledMsg, err := sm.UnmarshalMessage(msg)
 			if err != nil {
 				log.Panicf("Error unmarshaling operation from %v: %v", stream.Conn().RemoteMultiaddr().String(), err)
 			}
-			sm.GlobalSmCtx.IncomingOperations <- op
+			sm.GlobalSmCtx.IncomingMessages <- unmarshaledMsg
 		}
 	}
 }
