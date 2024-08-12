@@ -5,6 +5,7 @@ import (
 	"io"
 	"lamport-smr/helpers"
 	sm "lamport-smr/state-machine"
+	"lamport-smr/types"
 	"log"
 	"os"
 	"os/signal"
@@ -19,24 +20,17 @@ import (
 
 const PROTCOL_ID = "/smr/1.0.0"
 
-// NodeCtx holds the host address, peer addresses, and connections.
-type NodeCtx struct {
-	host    host.Host
-	streams []network.Stream
-	sync.Mutex
-}
-
 // nodeCtx is the singleton instance of NodeCtx.
-var nodeCtx *NodeCtx
+var nodeCtx *types.NodeCtx
 
 // once is used to ensure that initCtx is only called once.
 var once sync.Once
 
 func initCtx(host host.Host) {
 	once.Do(func() {
-		nodeCtx = &NodeCtx{
-			host:    host,
-			streams: make([]network.Stream, 0),
+		nodeCtx = &types.NodeCtx{
+			Host:    host,
+			Streams: make([]network.Stream, 0),
 		}
 	})
 }
@@ -69,7 +63,7 @@ func StartHost(hostAddr string, wg *sync.WaitGroup) {
 
 	initCtx(host)
 
-	nodeCtx.host.SetStreamHandler(PROTCOL_ID, handleStream)
+	nodeCtx.Host.SetStreamHandler(PROTCOL_ID, handleStream)
 	log.Println("---SUCCESSFULLY INITIALIZED HOST---")
 
 	wg.Add(2)
@@ -95,16 +89,16 @@ func EstablishConnections() {
 		if err != nil {
 			log.Panicf("Error getting multiaddr info: %v", err)
 		}
-		if err := nodeCtx.host.Connect(context.Background(), *peerInfo); err != nil {
+		if err := nodeCtx.Host.Connect(context.Background(), *peerInfo); err != nil {
 			log.Panicf("Failed to connect to peer %v: %v", peerAddr, err)
 		}
 		log.Printf("Successfully connected to %v", peerInfo.Addrs[0])
-		stream, err := nodeCtx.host.NewStream(context.Background(), peerInfo.ID, PROTCOL_ID)
+		stream, err := nodeCtx.Host.NewStream(context.Background(), peerInfo.ID, PROTCOL_ID)
 		if err != nil {
 			log.Panicf("Error creating new stream with %v: %v", peerAddr, err)
 		}
 		log.Printf("Successfully created stream with %v", peerInfo.Addrs[0])
-		nodeCtx.streams = append(nodeCtx.streams, stream)
+		nodeCtx.Streams = append(nodeCtx.Streams, stream)
 	}
 }
 
@@ -117,7 +111,7 @@ func handleOutgoingOps(wg *sync.WaitGroup) {
 		if err != nil {
 			log.Panicf("Failed to marshal message: %v", err)
 		}
-		for _, stream := range nodeCtx.streams {
+		for _, stream := range nodeCtx.Streams {
 			n, err := stream.Write(marshaledMsg)
 			if err != nil {
 				log.Panicf("Failed to write operation to stream: %v", err)
@@ -164,9 +158,9 @@ func removeStream(stream network.Stream) {
 	nodeCtx.Lock()
 	defer nodeCtx.Unlock()
 
-	for i, currSteam := range nodeCtx.streams {
+	for i, currSteam := range nodeCtx.Streams {
 		if stream.ID() == currSteam.ID() {
-			nodeCtx.streams = append(nodeCtx.streams[:i], nodeCtx.streams[i+1:]...)
+			nodeCtx.Streams = append(nodeCtx.Streams[:i], nodeCtx.Streams[i+1:]...)
 			break
 		}
 	}
@@ -178,7 +172,7 @@ func waitForShutdownSignal(wg *sync.WaitGroup) {
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	<-ch
 	log.Println("Received signal, shutting down...")
-	if err := nodeCtx.host.Close(); err != nil {
+	if err := nodeCtx.Host.Close(); err != nil {
 		panic(err)
 	}
 }
