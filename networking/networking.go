@@ -1,7 +1,10 @@
 package networking
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"errors"
 	"io"
 	"lamport-smr/helpers"
 	sm "lamport-smr/state-machine"
@@ -107,7 +110,7 @@ func handleOutgoingOps(wg *sync.WaitGroup) {
 
 	for {
 		msg := <-sm.GlobalSmCtx.OutgoingMessages
-		marshaledMsg, err := sm.MarshalMessage(msg)
+		marshaledMsg, err := MarshalMessage(msg)
 		if err != nil {
 			log.Panicf("Failed to marshal message: %v", err)
 		}
@@ -145,7 +148,7 @@ func handleStream(stream network.Stream) {
 
 		if n > 0 {
 			msg := buffer[:n]
-			unmarshaledMsg, err := sm.UnmarshalMessage(msg)
+			unmarshaledMsg, err := UnmarshalMessage(msg)
 			if err != nil {
 				log.Panicf("Error unmarshaling operation from %v: %v", stream.Conn().RemoteMultiaddr().String(), err)
 			}
@@ -175,4 +178,103 @@ func waitForShutdownSignal(wg *sync.WaitGroup) {
 	if err := nodeCtx.Host.Close(); err != nil {
 		panic(err)
 	}
+}
+
+// MarshalMessage converts a Message struct into a byte slice and returns an error if it fails.
+func MarshalMessage(msg *types.Message) ([]byte, error) {
+	buf := new(bytes.Buffer)
+
+	// Write the MsgType and SenderPid
+	if err := binary.Write(buf, binary.LittleEndian, int32(msg.MsgType)); err != nil {
+		return nil, err
+	}
+	if err := binary.Write(buf, binary.LittleEndian, int32(msg.SenderPid)); err != nil {
+		return nil, err
+	}
+
+	// Write the content based on the MsgType
+	switch msg.MsgType {
+	case types.OP:
+		op, ok := msg.Content.(types.Operation)
+		if !ok {
+			return nil, errors.New("invalid content type for OP message")
+		}
+		if err := binary.Write(buf, binary.LittleEndian, op.Timestamp); err != nil {
+			return nil, err
+		}
+		if err := binary.Write(buf, binary.LittleEndian, int32(op.Command)); err != nil {
+			return nil, err
+		}
+		if err := binary.Write(buf, binary.LittleEndian, op.Key); err != nil {
+			return nil, err
+		}
+		if err := binary.Write(buf, binary.LittleEndian, op.Value); err != nil {
+			return nil, err
+		}
+
+	case types.ACK:
+		ack, ok := msg.Content.(types.Acknowledgement)
+		if !ok {
+			return nil, errors.New("invalid content type for ACK message")
+		}
+		if err := binary.Write(buf, binary.LittleEndian, ack.Timestamp); err != nil {
+			return nil, err
+		}
+
+	default:
+		return nil, errors.New("unknown message type")
+	}
+
+	return buf.Bytes(), nil
+}
+
+// UnmarshalMessage converts a byte slice back into a Message struct and returns an error if it fails.
+func UnmarshalMessage(data []byte) (*types.Message, error) {
+	buf := bytes.NewReader(data)
+	msg := &types.Message{}
+
+	// Read the MsgType and SenderPid
+	var msgType, senderPid int32
+	if err := binary.Read(buf, binary.LittleEndian, &msgType); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(buf, binary.LittleEndian, &senderPid); err != nil {
+		return nil, err
+	}
+
+	msg.MsgType = types.MessageType(msgType)
+	msg.SenderPid = int(senderPid)
+
+	// Read the content based on the MsgType
+	switch msg.MsgType {
+	case types.OP:
+		var op types.Operation
+		if err := binary.Read(buf, binary.LittleEndian, &op.Timestamp); err != nil {
+			return nil, err
+		}
+		var command int32
+		if err := binary.Read(buf, binary.LittleEndian, &command); err != nil {
+			return nil, err
+		}
+		op.Command = types.CommandType(command)
+		if err := binary.Read(buf, binary.LittleEndian, &op.Key); err != nil {
+			return nil, err
+		}
+		if err := binary.Read(buf, binary.LittleEndian, &op.Value); err != nil {
+			return nil, err
+		}
+		msg.Content = op
+
+	case types.ACK:
+		var ack types.Acknowledgement
+		if err := binary.Read(buf, binary.LittleEndian, &ack.Timestamp); err != nil {
+			return nil, err
+		}
+		msg.Content = ack
+
+	default:
+		return nil, errors.New("unknown message type")
+	}
+
+	return msg, nil
 }

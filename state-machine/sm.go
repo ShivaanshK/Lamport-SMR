@@ -1,29 +1,12 @@
 package sm
 
 import (
-	"bytes"
-	"encoding/binary"
-	"errors"
 	"lamport-smr/types"
 	"log"
 	"math/rand/v2"
 	"os"
 	"sync"
 	"time"
-)
-
-// Command Types
-const (
-	GET types.CommandType = iota
-	PUT
-	DELETE
-	UPDATE
-)
-
-// Message Types
-const (
-	OP types.MessageType = iota
-	ACK
 )
 
 var GlobalSmCtx *types.SmCtx
@@ -47,8 +30,6 @@ func InitGlobalSmCtx(pid int, peerPids map[string]int, wg *sync.WaitGroup) {
 		}
 		// Init RNG with a random seed
 		GlobalSmCtx.Rng = rand.New(rand.NewPCG(uint64(os.Getpid()), uint64(pid)))
-		// Initialize it with 1 value
-		GlobalSmCtx.StateMachine[0] = 0
 		wg.Add(3)
 		go onReceive(wg)
 		go constantCheck(wg)
@@ -65,7 +46,7 @@ func onReceive(wg *sync.WaitGroup) {
 	for {
 		incomingMsg := <-GlobalSmCtx.IncomingMessages
 		switch incomingMsg.MsgType {
-		case OP:
+		case types.OP:
 			opContent, ok := incomingMsg.Content.(types.Operation)
 			if !ok {
 				log.Panicf("Couldn't find operation in message")
@@ -82,12 +63,12 @@ func onReceive(wg *sync.WaitGroup) {
 				Timestamp: GlobalSmCtx.Timestamps[pid],
 			}
 			msg := &types.Message{
-				MsgType:   ACK,
+				MsgType:   types.ACK,
 				SenderPid: GlobalSmCtx.Pid,
 			}
 			msg.SetAcknowledgement(ack)
 			GlobalSmCtx.OutgoingMessages <- msg
-		case ACK:
+		case types.ACK:
 			ackContent, ok := incomingMsg.Content.(types.Acknowledgement)
 			if !ok {
 				log.Panicf("Couldn't find acknowledgment in message")
@@ -137,29 +118,39 @@ func simulateExecution(wg *sync.WaitGroup) {
 		timeToExecute := r.IntN(10)
 		time.Sleep(time.Duration(timeToExecute) * time.Second)
 
+		var command types.CommandType
 		// Local event
-		command := types.CommandType(r.Int32N(4))
+		if len(GlobalSmCtx.StateMachine) == 0 {
+			command = types.PUT
+		} else {
+			command = types.CommandType(r.Int32N(4))
+		}
 		var key int32 = 0
 		var value int32 = 0
-		if command == GET || command == DELETE {
+		if command == types.GET || command == types.DELETE {
 			existentKey, err := GlobalSmCtx.FindRandomExistingKey()
 			if err != nil {
 				log.Panicf("Couldnt find a key that exists: %v", err)
 			}
 			key = existentKey
 		} else {
-			nonExistentKey, err := GlobalSmCtx.FindRandomExistingKey()
-			if err != nil {
-				log.Panicf("Couldnt find a key that exists: %v", err)
+			if command == types.PUT {
+				key = GlobalSmCtx.FindRandomNonExistingKey()
+			} else {
+				existentKey, err := GlobalSmCtx.FindRandomExistingKey()
+				if err != nil {
+					log.Panicf("Couldnt find a key that exists: %v", err)
+				}
+				key = existentKey
 			}
-			key = nonExistentKey
-			value = r.Int32N(1000)
+			value = r.Int32()
 		}
 		GlobalSmCtx.IncrementTimestamp(pid)
 		op := createOperation(command, GlobalSmCtx.GetTimestamp(pid), key, value)
-		log.Printf("CLIENT REQUEST: %v", command)
+		log.Printf("CLIENT REQUEST: %v", op)
+		GlobalSmCtx.AppendLog(&op)
 		msg := &types.Message{
-			MsgType:   OP,
+			MsgType:   types.OP,
 			SenderPid: GlobalSmCtx.Pid,
 		}
 		msg.SetOperation(op)
@@ -174,103 +165,4 @@ func createOperation(command types.CommandType, timestamp, key, value int32) typ
 		Key:       key,
 		Value:     value,
 	}
-}
-
-// MarshalMessage converts a Message struct into a byte slice and returns an error if it fails.
-func MarshalMessage(msg *types.Message) ([]byte, error) {
-	buf := new(bytes.Buffer)
-
-	// Write the MsgType and SenderPid
-	if err := binary.Write(buf, binary.LittleEndian, int32(msg.MsgType)); err != nil {
-		return nil, err
-	}
-	if err := binary.Write(buf, binary.LittleEndian, int32(msg.SenderPid)); err != nil {
-		return nil, err
-	}
-
-	// Write the content based on the MsgType
-	switch msg.MsgType {
-	case OP:
-		op, ok := msg.Content.(types.Operation)
-		if !ok {
-			return nil, errors.New("invalid content type for OP message")
-		}
-		if err := binary.Write(buf, binary.LittleEndian, op.Timestamp); err != nil {
-			return nil, err
-		}
-		if err := binary.Write(buf, binary.LittleEndian, int32(op.Command)); err != nil {
-			return nil, err
-		}
-		if err := binary.Write(buf, binary.LittleEndian, op.Key); err != nil {
-			return nil, err
-		}
-		if err := binary.Write(buf, binary.LittleEndian, op.Value); err != nil {
-			return nil, err
-		}
-
-	case ACK:
-		ack, ok := msg.Content.(types.Acknowledgement)
-		if !ok {
-			return nil, errors.New("invalid content type for ACK message")
-		}
-		if err := binary.Write(buf, binary.LittleEndian, ack.Timestamp); err != nil {
-			return nil, err
-		}
-
-	default:
-		return nil, errors.New("unknown message type")
-	}
-
-	return buf.Bytes(), nil
-}
-
-// UnmarshalMessage converts a byte slice back into a Message struct and returns an error if it fails.
-func UnmarshalMessage(data []byte) (*types.Message, error) {
-	buf := bytes.NewReader(data)
-	msg := &types.Message{}
-
-	// Read the MsgType and SenderPid
-	var msgType, senderPid int32
-	if err := binary.Read(buf, binary.LittleEndian, &msgType); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(buf, binary.LittleEndian, &senderPid); err != nil {
-		return nil, err
-	}
-
-	msg.MsgType = types.MessageType(msgType)
-	msg.SenderPid = int(senderPid)
-
-	// Read the content based on the MsgType
-	switch msg.MsgType {
-	case OP:
-		var op types.Operation
-		if err := binary.Read(buf, binary.LittleEndian, &op.Timestamp); err != nil {
-			return nil, err
-		}
-		var command int32
-		if err := binary.Read(buf, binary.LittleEndian, &command); err != nil {
-			return nil, err
-		}
-		op.Command = types.CommandType(command)
-		if err := binary.Read(buf, binary.LittleEndian, &op.Key); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(buf, binary.LittleEndian, &op.Value); err != nil {
-			return nil, err
-		}
-		msg.Content = op
-
-	case ACK:
-		var ack types.Acknowledgement
-		if err := binary.Read(buf, binary.LittleEndian, &ack.Timestamp); err != nil {
-			return nil, err
-		}
-		msg.Content = ack
-
-	default:
-		return nil, errors.New("unknown message type")
-	}
-
-	return msg, nil
 }

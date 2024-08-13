@@ -2,11 +2,30 @@ package types
 
 import (
 	"fmt"
+	"log"
 	"math/rand/v2"
 	"sync"
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
+)
+
+type CommandType int32
+
+type MessageType int32
+
+// Command Types
+const (
+	GET CommandType = iota
+	PUT
+	DELETE
+	UPDATE
+)
+
+// Message Types
+const (
+	OP MessageType = iota
+	ACK
 )
 
 // NodeCtx holds the host address, peer addresses, and connections.
@@ -15,10 +34,6 @@ type NodeCtx struct {
 	Streams []network.Stream
 	sync.Mutex
 }
-
-type CommandType int32
-
-type MessageType int32
 
 // Operation represents an operation in the state machine.
 type Operation struct {
@@ -142,6 +157,24 @@ func (smCtx *SmCtx) Apply(op *Operation) {
 	defer smCtx.SmMutex.Unlock()
 
 	// Implement
+	switch op.Command {
+	case GET:
+		// In reality would involve returning value to client or sender
+		log.Printf("GET returned %v from key %v", smCtx.StateMachine[op.Key], op.Key)
+	case PUT:
+		log.Printf("PUT %v in key %v", op.Value, op.Key)
+		smCtx.StateMachine[op.Key] = smCtx.StateMachine[op.Value]
+	case DELETE:
+		log.Printf("DELETED key %v with value %v", op.Key, op.Value)
+		delete(smCtx.StateMachine, op.Key)
+	case UPDATE:
+		log.Printf("UPDATED key %v with value %v", op.Key, op.Value)
+		smCtx.StateMachine[op.Key] = smCtx.StateMachine[op.Value]
+	default:
+		log.Panicf("Invalid command: %v", op.Command)
+	}
+
+	log.Printf("RESULTING STATE MACHINE:\n%v", smCtx.StateMachine)
 }
 
 // SetOperation sets the content to an Operation, and resets Acknowledgement if it exists
