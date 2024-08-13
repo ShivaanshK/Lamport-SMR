@@ -2,7 +2,7 @@
 
 ## Overview
 
-This repository implements Lamport's State Machine Replication (SMR) algorithm using **Lamport logical clocks** for consistent replication of a key-value store across a distributed system. The operations that the key-value store supports are get, put, delete, and update. To run a demo, do the following.
+This repository implements Lamport's State Machine Replication (SMR) algorithm using lamport (logical) clocks for consistent replication of a key-value store across a distributed system. The operations that the key-value store supports are get, put, delete, and update. To run a demo, do the following.
 
 ```bash
 git clone git@github.com:ShivaanshK/Lamport-SMR.git
