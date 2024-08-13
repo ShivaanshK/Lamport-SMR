@@ -45,19 +45,24 @@ type SmCtx struct {
 	Pid              int
 	PeerPids         map[string]int
 	StateMachine     map[int32]int32
+	SmMutex          sync.Mutex
 	Logs             []*Operation
+	LogsMutex        sync.Mutex
 	Timestamps       []int32
+	TimestampsMutex  sync.Mutex
 	IncomingMessages chan *Message
 	OutgoingMessages chan *Message
 	StartSignal      chan struct{}
 	Rng              *rand.Rand
-	sync.Mutex
 }
 
 // FindRandomExistingKey returns a random key that exists in the state machine.
 // It returns an error if the state machine is empty.
 // Should be called under lock
 func (smCtx *SmCtx) FindRandomExistingKey() (int32, error) {
+	smCtx.SmMutex.Lock()
+	defer smCtx.SmMutex.Unlock()
+
 	if len(smCtx.StateMachine) == 0 {
 		return 0, fmt.Errorf("state machine is empty")
 	}
@@ -75,12 +80,68 @@ func (smCtx *SmCtx) FindRandomExistingKey() (int32, error) {
 // FindRandomNonExistingKey generates and returns a random key that does not exist in the state machine.
 // Should be called under lock
 func (smCtx *SmCtx) FindRandomNonExistingKey() int32 {
+	smCtx.SmMutex.Lock()
+	defer smCtx.SmMutex.Unlock()
+
 	for {
 		randomKey := rand.Int32()
 		if _, exists := smCtx.StateMachine[randomKey]; !exists {
 			return randomKey
 		}
 	}
+}
+
+func (smCtx *SmCtx) PeekLog() (*Operation, bool) {
+	smCtx.LogsMutex.Lock()
+	defer smCtx.LogsMutex.Unlock()
+
+	if len(smCtx.Logs) > 0 {
+		return smCtx.Logs[0], true
+	} else {
+		return nil, false
+	}
+}
+
+func (smCtx *SmCtx) PopLog() {
+	smCtx.LogsMutex.Lock()
+	defer smCtx.LogsMutex.Unlock()
+
+	smCtx.Logs = smCtx.Logs[1:]
+}
+
+func (smCtx *SmCtx) AppendLog(op *Operation) {
+	smCtx.LogsMutex.Lock()
+	defer smCtx.LogsMutex.Unlock()
+
+	smCtx.Logs = append(smCtx.Logs, op)
+}
+
+func (smCtx *SmCtx) UpdateTimestamp(pid int, timestamp int32) {
+	smCtx.TimestampsMutex.Lock()
+	defer smCtx.TimestampsMutex.Unlock()
+
+	smCtx.Timestamps[pid] = int32(timestamp)
+}
+
+func (smCtx *SmCtx) IncrementTimestamp(pid int) {
+	smCtx.TimestampsMutex.Lock()
+	defer smCtx.TimestampsMutex.Unlock()
+
+	smCtx.Timestamps[pid] = smCtx.Timestamps[pid] + 1
+}
+
+func (smCtx *SmCtx) GetTimestamp(pid int) int32 {
+	smCtx.TimestampsMutex.Lock()
+	defer smCtx.TimestampsMutex.Unlock()
+
+	return smCtx.Timestamps[pid]
+}
+
+func (smCtx *SmCtx) Apply(op *Operation) {
+	smCtx.SmMutex.Lock()
+	defer smCtx.SmMutex.Unlock()
+
+	// Implement
 }
 
 // SetOperation sets the content to an Operation, and resets Acknowledgement if it exists

@@ -64,7 +64,6 @@ func onReceive(wg *sync.WaitGroup) {
 
 	for {
 		incomingMsg := <-GlobalSmCtx.IncomingMessages
-		GlobalSmCtx.Lock()
 		switch incomingMsg.MsgType {
 		case OP:
 			opContent, ok := incomingMsg.Content.(types.Operation)
@@ -73,10 +72,11 @@ func onReceive(wg *sync.WaitGroup) {
 			}
 			op := &opContent
 			log.Printf("Received Operation: %v", op)
-			GlobalSmCtx.Logs = append(GlobalSmCtx.Logs, op)                                  // Add new op to logs
+			GlobalSmCtx.AppendLog(op)                                                        // Add new op to logs
+			GlobalSmCtx.TimestampsMutex.Lock()                                               // Reads and updates on timestamps array under lock
 			GlobalSmCtx.Timestamps[pid] = max(op.Timestamp, GlobalSmCtx.Timestamps[pid]) + 1 // Update local lamport clock to max of op and local + 1 (for receive)
 			GlobalSmCtx.Timestamps[incomingMsg.SenderPid] = op.Timestamp                     // Update sending process's lamport clock to what they sent
-			GlobalSmCtx.Unlock()
+			GlobalSmCtx.TimestampsMutex.Unlock()
 			// Create and send an acknowledgement
 			ack := types.Acknowledgement{
 				Timestamp: GlobalSmCtx.Timestamps[pid],
@@ -92,10 +92,7 @@ func onReceive(wg *sync.WaitGroup) {
 			if !ok {
 				log.Panicf("Couldn't find acknowledgment in message")
 			}
-			GlobalSmCtx.Timestamps[incomingMsg.SenderPid] = ackContent.Timestamp // Update the acknowledged lamport clock for the given process
-			GlobalSmCtx.Unlock()
-		default:
-			GlobalSmCtx.Unlock()
+			GlobalSmCtx.UpdateTimestamp(incomingMsg.SenderPid, ackContent.Timestamp) // Update the acknowledged lamport clock for the given process
 		}
 	}
 }
@@ -104,7 +101,26 @@ func constantCheck(wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for {
-
+		op, exists := GlobalSmCtx.PeekLog()
+		if exists {
+			canApply := true
+			GlobalSmCtx.TimestampsMutex.Lock()
+			for index, timestamp := range GlobalSmCtx.Timestamps {
+				if index == GlobalSmCtx.Pid {
+					continue
+				}
+				if op.Timestamp >= timestamp {
+					canApply = false
+					break
+				}
+			}
+			GlobalSmCtx.TimestampsMutex.Unlock()
+			if canApply {
+				log.Printf("APPLYING OP: %v", op)
+				GlobalSmCtx.Apply(op)
+				GlobalSmCtx.PopLog()
+			}
+		}
 	}
 }
 
@@ -122,7 +138,6 @@ func simulateExecution(wg *sync.WaitGroup) {
 		time.Sleep(time.Duration(timeToExecute) * time.Second)
 
 		// Local event
-		GlobalSmCtx.Lock()
 		command := types.CommandType(r.Int32N(4))
 		var key int32 = 0
 		var value int32 = 0
@@ -140,9 +155,8 @@ func simulateExecution(wg *sync.WaitGroup) {
 			key = nonExistentKey
 			value = r.Int32N(1000)
 		}
-		GlobalSmCtx.Timestamps[pid] = GlobalSmCtx.Timestamps[pid] + 1
-		GlobalSmCtx.Unlock()
-		op := createOperation(command, GlobalSmCtx.Timestamps[pid], key, value)
+		GlobalSmCtx.IncrementTimestamp(pid)
+		op := createOperation(command, GlobalSmCtx.GetTimestamp(pid), key, value)
 		log.Printf("CLIENT REQUEST: %v", command)
 		msg := &types.Message{
 			MsgType:   OP,
