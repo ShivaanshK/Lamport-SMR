@@ -68,6 +68,7 @@ func StartHost(hostAddr string, wg *sync.WaitGroup) {
 
 	nodeCtx.Host.SetStreamHandler(PROTCOL_ID, handleStream)
 	log.Println("---SUCCESSFULLY INITIALIZED HOST---")
+	log.Printf("Host Peer ID: %v", nodeCtx.Host.ID().String())
 
 	wg.Add(2)
 	go handleOutgoingOps(wg)
