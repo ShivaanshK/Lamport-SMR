@@ -163,13 +163,13 @@ func (smCtx *SmCtx) Apply(op *Operation) {
 		log.Printf("GET returned %v from key %v", smCtx.StateMachine[op.Key], op.Key)
 	case PUT:
 		log.Printf("PUT %v in key %v", op.Value, op.Key)
-		smCtx.StateMachine[op.Key] = smCtx.StateMachine[op.Value]
+		smCtx.StateMachine[op.Key] = op.Value
 	case DELETE:
 		log.Printf("DELETED key %v with value %v", op.Key, op.Value)
 		delete(smCtx.StateMachine, op.Key)
 	case UPDATE:
 		log.Printf("UPDATED key %v with value %v", op.Key, op.Value)
-		smCtx.StateMachine[op.Key] = smCtx.StateMachine[op.Value]
+		smCtx.StateMachine[op.Key] = op.Value
 	default:
 		log.Panicf("Invalid command: %v", op.Command)
 	}
