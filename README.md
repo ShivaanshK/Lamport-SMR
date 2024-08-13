@@ -9,9 +9,9 @@ git clone git@github.com:ShivaanshK/Lamport-SMR.git
 cd Lamport-SMR
 ```
 ```bash
-# In first shell
+# In the first shell
 go run main.go -pid=0
-# In second shell shell
+# In the second shell
 go run main.go -pid=1
 ...
 ```
