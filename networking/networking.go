@@ -111,7 +111,7 @@ func handleOutgoingOps(wg *sync.WaitGroup) {
 
 	for {
 		msg := <-sm.GlobalSmCtx.OutgoingMessages
-		marshaledMsg, err := MarshalMessage(msg)
+		marshaledMsg, err := marshalMessage(msg)
 		if err != nil {
 			log.Panicf("Failed to marshal message: %v", err)
 		}
@@ -149,7 +149,7 @@ func handleStream(stream network.Stream) {
 
 		if n > 0 {
 			msg := buffer[:n]
-			unmarshaledMsg, err := UnmarshalMessage(msg)
+			unmarshaledMsg, err := unmarshalMessage(msg)
 			if err != nil {
 				log.Panicf("Error unmarshaling operation from %v: %v", stream.Conn().RemoteMultiaddr().String(), err)
 			}
@@ -170,19 +170,8 @@ func removeStream(stream network.Stream) {
 	}
 }
 
-func waitForShutdownSignal(wg *sync.WaitGroup) {
-	defer wg.Done()
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	<-ch
-	log.Println("Received signal, shutting down...")
-	if err := nodeCtx.Host.Close(); err != nil {
-		panic(err)
-	}
-}
-
-// MarshalMessage converts a Message struct into a byte slice and returns an error if it fails.
-func MarshalMessage(msg *types.Message) ([]byte, error) {
+// marshalMessage converts a Message struct into a byte slice and returns an error if it fails.
+func marshalMessage(msg *types.Message) ([]byte, error) {
 	buf := new(bytes.Buffer)
 
 	// Write the MsgType and SenderPid
@@ -229,8 +218,8 @@ func MarshalMessage(msg *types.Message) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// UnmarshalMessage converts a byte slice back into a Message struct and returns an error if it fails.
-func UnmarshalMessage(data []byte) (*types.Message, error) {
+// unmarshalMessage converts a byte slice back into a Message struct and returns an error if it fails.
+func unmarshalMessage(data []byte) (*types.Message, error) {
 	buf := bytes.NewReader(data)
 	msg := &types.Message{}
 
@@ -278,4 +267,15 @@ func UnmarshalMessage(data []byte) (*types.Message, error) {
 	}
 
 	return msg, nil
+}
+
+func waitForShutdownSignal(wg *sync.WaitGroup) {
+	defer wg.Done()
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	<-ch
+	log.Println("Received signal, shutting down...")
+	if err := nodeCtx.Host.Close(); err != nil {
+		panic(err)
+	}
 }
