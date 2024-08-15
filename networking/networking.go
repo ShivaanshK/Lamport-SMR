@@ -45,7 +45,7 @@ func StartHost(hostAddr string, wg *sync.WaitGroup) {
 	}
 
 	pid := sm.GlobalSmCtx.Pid
-	priv, err := helpers.GetKey(pid)
+	priv, err := helpers.GetKey(int(pid))
 	if err != nil {
 		log.Panicf("Error getting private key for peer %v: %v", pid, err)
 	}
@@ -178,9 +178,6 @@ func marshalMessage(msg *types.Message) ([]byte, error) {
 	if err := binary.Write(buf, binary.LittleEndian, int32(msg.MsgType)); err != nil {
 		return nil, err
 	}
-	if err := binary.Write(buf, binary.LittleEndian, int32(msg.SenderPid)); err != nil {
-		return nil, err
-	}
 
 	// Write the content based on the MsgType
 	switch msg.MsgType {
@@ -188,6 +185,9 @@ func marshalMessage(msg *types.Message) ([]byte, error) {
 		op, ok := msg.Content.(types.Operation)
 		if !ok {
 			return nil, errors.New("invalid content type for OP message")
+		}
+		if err := binary.Write(buf, binary.LittleEndian, op.SenderPid); err != nil {
+			return nil, err
 		}
 		if err := binary.Write(buf, binary.LittleEndian, op.Timestamp); err != nil {
 			return nil, err
@@ -207,6 +207,9 @@ func marshalMessage(msg *types.Message) ([]byte, error) {
 		if !ok {
 			return nil, errors.New("invalid content type for ACK message")
 		}
+		if err := binary.Write(buf, binary.LittleEndian, ack.SenderPid); err != nil {
+			return nil, err
+		}
 		if err := binary.Write(buf, binary.LittleEndian, ack.Timestamp); err != nil {
 			return nil, err
 		}
@@ -224,21 +227,20 @@ func unmarshalMessage(data []byte) (*types.Message, error) {
 	msg := &types.Message{}
 
 	// Read the MsgType and SenderPid
-	var msgType, senderPid int32
+	var msgType int32
 	if err := binary.Read(buf, binary.LittleEndian, &msgType); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(buf, binary.LittleEndian, &senderPid); err != nil {
 		return nil, err
 	}
 
 	msg.MsgType = types.MessageType(msgType)
-	msg.SenderPid = int(senderPid)
 
 	// Read the content based on the MsgType
 	switch msg.MsgType {
 	case types.OP:
 		var op types.Operation
+		if err := binary.Read(buf, binary.LittleEndian, &op.SenderPid); err != nil {
+			return nil, err
+		}
 		if err := binary.Read(buf, binary.LittleEndian, &op.Timestamp); err != nil {
 			return nil, err
 		}
@@ -257,6 +259,9 @@ func unmarshalMessage(data []byte) (*types.Message, error) {
 
 	case types.ACK:
 		var ack types.Acknowledgement
+		if err := binary.Read(buf, binary.LittleEndian, &ack.SenderPid); err != nil {
+			return nil, err
+		}
 		if err := binary.Read(buf, binary.LittleEndian, &ack.Timestamp); err != nil {
 			return nil, err
 		}

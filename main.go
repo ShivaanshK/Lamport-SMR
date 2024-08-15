@@ -21,10 +21,10 @@ func main() {
 	}
 	var wg sync.WaitGroup
 
-	sm.InitGlobalSmCtx(*pid, peers, &wg)
+	sm.InitGlobalSmCtx(int32(*pid), peers, &wg)
 
 	networking.StartHost(serverAddr, &wg)
-	time.Sleep(3 * time.Second) // Give time to all peers to start their hosts
+	time.Sleep(10 * time.Second) // Give time to all peers to start their hosts
 	networking.EstablishConnections()
 
 	close(sm.GlobalSmCtx.StartSignal) // Send start signal after network is setup

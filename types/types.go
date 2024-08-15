@@ -37,6 +37,7 @@ type NodeCtx struct {
 
 // Operation represents an operation in the state machine.
 type Operation struct {
+	SenderPid int32
 	Timestamp int32
 	Command   CommandType
 	Key       int32
@@ -45,19 +46,19 @@ type Operation struct {
 
 // Acknowledgement represents an ack that means that the sender's timestamp was set to the given value
 type Acknowledgement struct {
+	SenderPid int32
 	Timestamp int32
 }
 
 type MessageContent interface{}
 
 type Message struct {
-	MsgType   MessageType
-	Content   MessageContent
-	SenderPid int
+	MsgType MessageType
+	Content MessageContent
 }
 
 type SmCtx struct {
-	Pid              int
+	Pid              int32
 	PeerPids         map[string]int
 	StateMachine     map[int32]int32
 	SmMutex          sync.Mutex
@@ -127,7 +128,20 @@ func (smCtx *SmCtx) PopLog() {
 func (smCtx *SmCtx) AppendLog(op *Operation) {
 	smCtx.LogsMutex.Lock()
 	defer smCtx.LogsMutex.Unlock()
-
+	// Find the appropriate position to insert the new operation
+	for index, curr_op := range smCtx.Logs {
+		if curr_op.Timestamp > op.Timestamp {
+			// Insert op before curr_op
+			smCtx.Logs = append(smCtx.Logs[:index], append([]*Operation{op}, smCtx.Logs[index:]...)...)
+			return
+		} else if curr_op.Timestamp == op.Timestamp {
+			// Tie-breaking using sender's PID
+			if op.SenderPid < curr_op.SenderPid {
+				smCtx.Logs = append(smCtx.Logs[:index], append([]*Operation{op}, smCtx.Logs[index:]...)...)
+				return
+			}
+		}
+	}
 	smCtx.Logs = append(smCtx.Logs, op)
 }
 

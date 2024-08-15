@@ -15,7 +15,7 @@ var GlobalSmCtx *types.SmCtx
 var once sync.Once
 
 // NewSmCtx creates a new state machine context with initialized fields.
-func InitGlobalSmCtx(pid int, peerPids map[string]int, wg *sync.WaitGroup) {
+func InitGlobalSmCtx(pid int32, peerPids map[string]int, wg *sync.WaitGroup) {
 	once.Do(func() {
 		numProcesses := 1 + len(peerPids)
 		GlobalSmCtx = &types.SmCtx{
@@ -56,15 +56,15 @@ func onReceive(wg *sync.WaitGroup) {
 			GlobalSmCtx.AppendLog(op)                                                        // Add new op to logs
 			GlobalSmCtx.TimestampsMutex.Lock()                                               // Reads and updates on timestamps array under lock
 			GlobalSmCtx.Timestamps[pid] = max(op.Timestamp, GlobalSmCtx.Timestamps[pid]) + 1 // Update local lamport clock to max of op and local + 1 (for receive)
-			GlobalSmCtx.Timestamps[incomingMsg.SenderPid] = op.Timestamp                     // Update sending process's lamport clock to what they sent
+			GlobalSmCtx.Timestamps[op.SenderPid] = op.Timestamp                              // Update sending process's lamport clock to what they sent
 			GlobalSmCtx.TimestampsMutex.Unlock()
 			// Create and send an acknowledgement
 			ack := types.Acknowledgement{
 				Timestamp: GlobalSmCtx.Timestamps[pid],
+				SenderPid: op.SenderPid,
 			}
 			msg := &types.Message{
-				MsgType:   types.ACK,
-				SenderPid: GlobalSmCtx.Pid,
+				MsgType: types.ACK,
 			}
 			msg.SetAcknowledgement(ack)
 			GlobalSmCtx.OutgoingMessages <- msg
@@ -73,7 +73,7 @@ func onReceive(wg *sync.WaitGroup) {
 			if !ok {
 				log.Panicf("Couldn't find acknowledgment in message")
 			}
-			GlobalSmCtx.UpdateTimestamp(incomingMsg.SenderPid, ackContent.Timestamp) // Update the acknowledged lamport clock for the given process
+			GlobalSmCtx.UpdateTimestamp(int(ackContent.SenderPid), ackContent.Timestamp) // Update the acknowledged lamport clock for the given process
 		}
 	}
 }
@@ -87,7 +87,7 @@ func constantCheck(wg *sync.WaitGroup) {
 			canApply := true
 			GlobalSmCtx.TimestampsMutex.Lock()
 			for index, timestamp := range GlobalSmCtx.Timestamps {
-				if index == GlobalSmCtx.Pid {
+				if int32(index) == GlobalSmCtx.Pid {
 					continue
 				}
 				if op.Timestamp >= timestamp {
@@ -115,11 +115,13 @@ func simulateExecution(wg *sync.WaitGroup) {
 
 	// Simulate a client making intermittent requests
 	for {
-		timeToExecute := r.IntN(10)
-		time.Sleep(time.Duration(timeToExecute) * time.Second)
+		timeToWait := r.IntN(10)
+		log.Printf("---WAITING %v SECONDS---", timeToWait)
+		time.Sleep(time.Duration(timeToWait) * time.Second)
 
+		// Local Event
+		GlobalSmCtx.TimestampsMutex.Lock()
 		var command types.CommandType
-		// Local event
 		if len(GlobalSmCtx.StateMachine) == 0 {
 			command = types.PUT
 		} else {
@@ -145,21 +147,22 @@ func simulateExecution(wg *sync.WaitGroup) {
 			}
 			value = r.Int32()
 		}
-		GlobalSmCtx.IncrementTimestamp(pid)
-		op := createOperation(command, GlobalSmCtx.GetTimestamp(pid), key, value)
+		GlobalSmCtx.Timestamps[pid] = GlobalSmCtx.Timestamps[pid] + 1
+		op := createOperation(command, GlobalSmCtx.Pid, GlobalSmCtx.Timestamps[pid], key, value)
+		GlobalSmCtx.TimestampsMutex.Unlock()
 		log.Printf("CLIENT REQUEST: %v", op)
 		GlobalSmCtx.AppendLog(&op)
 		msg := &types.Message{
-			MsgType:   types.OP,
-			SenderPid: GlobalSmCtx.Pid,
+			MsgType: types.OP,
 		}
 		msg.SetOperation(op)
 		GlobalSmCtx.OutgoingMessages <- msg
 	}
 }
 
-func createOperation(command types.CommandType, timestamp, key, value int32) types.Operation {
+func createOperation(command types.CommandType, pid, timestamp, key, value int32) types.Operation {
 	return types.Operation{
+		SenderPid: pid,
 		Timestamp: timestamp,
 		Command:   command,
 		Key:       key,

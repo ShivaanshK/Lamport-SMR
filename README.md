@@ -13,5 +13,7 @@ cd Lamport-SMR
 go run main.go -pid=0
 # In the second shell
 go run main.go -pid=1
+# In the third shell
+go run main.go -pid=2
 ...
 ```
