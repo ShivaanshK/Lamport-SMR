@@ -15,5 +15,8 @@ go run main.go -pid=0
 go run main.go -pid=1
 # In the third shell
 go run main.go -pid=2
-...
+# In the fourth shell
+go run main.go -pid=3
 ```
+
+***Note:*** You can add more processes to config.json to be able to run more processes. Processes need to be added as a full libp2p multiaddr.
