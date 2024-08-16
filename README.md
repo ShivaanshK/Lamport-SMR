@@ -19,4 +19,4 @@ go run main.go -pid=2
 go run main.go -pid=3
 ```
 
-***Note:*** You can add more processes to config.json to be able to run more processes. Processes need to be added as a full libp2p multiaddr.
+***Note:*** You can add more processes to config.json to be able to run the algorithm with more processes. Processes need to be added as a full libp2p multiaddr and run by setting the ```-pid``` flag as their index in the host list.
