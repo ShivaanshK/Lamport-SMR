@@ -19,4 +19,4 @@ go run main.go -pid=2
 go run main.go -pid=3
 ```
 
-***Note:*** You can add more processes to config.json to be able to run the algorithm with more processes. Processes need to be added as a [multiaddress]("https://docs.libp2p.io/concepts/fundamentals/addressing/") and run by setting the ```-pid``` flag as their index in the host list.
+***Note:*** You can add more processes to config.json to be able to run the algorithm with more processes. Processes need to be added as a [multiaddress](https://docs.libp2p.io/concepts/fundamentals/addressing/) and run by setting the ```-pid``` flag as their index in the host list.
